@@ -1,0 +1,331 @@
+// HACCP-Builder data model
+// Configured for Postgres (required for deployment on Render — its
+// filesystem is ephemeral). DATABASE_URL should point at a Postgres
+// connection string; see DEPLOYMENT.md for how to provision one on Render
+// for both local dev and production.
+//
+// Note: fields that would naturally be Prisma enums (membershipTier,
+// status, type, severity, likelihood, ccpStatus) are typed as String
+// instead of a real Prisma enum, and facilityProfile is stored as a
+// serialized JSON string instead of a native Json column, following the
+// same convention as the reference PCP Planner app (originally chosen for
+// SQLite compatibility during prototyping; works fine on Postgres too).
+// Allowed values for each String-typed field are documented in a comment
+// above the field and enforced in application code (see src/lib and the
+// API routes).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Accounts -----------------------------------------------------------
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  name           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Billing / membership status. A user unlocks a plan with a one-time fee.
+  // An active storage subscription extends retention beyond the default
+  // window and keeps plans stored indefinitely while active.
+  // Allowed values: "FREE" | "UNLOCKED"
+  membershipTier          String    @default("FREE")
+  storageSubscriptionEnd  DateTime? // null = no active extended-storage subscription
+  stripeCustomerId        String?
+  dataDeletionRequestedAt DateTime? // set when user requests account/data purge
+
+  plans    Plan[]
+  sessions SessionToken[]
+}
+
+// Lightweight session/login audit record, kept separate from NextAuth's own
+// JWT session so there's an auditable login record without extra adapters.
+model SessionToken {
+  id        String   @id @default(cuid())
+  userId    String
+  createdAt DateTime @default(now())
+  userAgent String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --- HACCP Plan -----------------------------------------------------------
+
+model Plan {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name String @default("Untitled HACCP Plan")
+  // Allowed values: "DRAFT" | "HAZARD_ANALYSIS_COMPLETE" | "CCP_COMPLETE" | "FINALIZED"
+  status String @default("DRAFT")
+
+  // Facility profile, serialized as a JSON string (facility name/address,
+  // food categories, US/CA regulatory scope, responsible individual, etc.)
+  facilityProfile String?
+
+  isPaid Boolean   @default(false) // one-time fee paid to unlock export/full features
+  paidAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  // When this record should be purged if no active storage subscription exists.
+  retentionExpiresAt DateTime?
+
+  products          Product[]
+  vendors           Vendor[]
+  sops              Sop[]
+  exports           PlanExport[]
+  recallContacts    RecallContact[]
+  mockRecallRecords MockRecallRecord[]
+  haccpTeamMembers  HaccpTeamMember[]
+
+  @@index([userId])
+}
+
+// Preliminary Step 1 (Codex/NACMCF): the HACCP team. Distinct from
+// RecallContact (recall team) below — a HACCP team and a recall team are
+// different things, though the same person can be on both.
+model HaccpTeamMember {
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  name            String
+  role            String? // title/role at the facility (e.g. "Plant Manager", "QA Lead")
+  expertise       String? // area of expertise this member brings (e.g. "microbiology", "engineering/process")
+  responsibilities String? // this member's responsibilities on the HACCP team
+  order           Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([planId])
+}
+
+// An approved supplier/vendor for the facility. Facility-wide (shared
+// across all products); populates the Approved Supplier List in the
+// vendor-qualification and supplier-verification SOPs and the exported
+// plan, and can be referenced by an Ingredient's formulation record.
+model Vendor {
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  name              String
+  materialsSupplied String?
+  contactName       String?
+  phone             String?
+  email             String?
+  // Food safety certification / GFSI status (e.g. "SQF", "BRCGS", "none")
+  certification String?
+  // Allowed values: "APPROVED" | "PENDING" | "SUSPENDED"
+  status          String  @default("APPROVED")
+  guaranteeOnFile Boolean @default(false)
+  guaranteeExpiry String?
+  approvalDate    String?
+  notes           String?
+  order           Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ingredients Ingredient[]
+
+  @@index([planId])
+}
+
+// A single product made at this facility. Preliminary Steps 2 & 3
+// (product description/distribution, intended use & consumers) live here.
+// Preliminary Step 5 (on-site confirmation of the flow diagram) is folded
+// into this model rather than a separate one, per-product.
+model Product {
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  name                String
+  productDescription  String? // composition, processing method, distribution (Prelim Step 2)
+  intendedUse         String? // e.g. ready-to-eat, requires cooking (Prelim Step 3)
+  intendedConsumer    String? // general public or a vulnerable population (Prelim Step 3)
+  packagingType       String?
+  shelfLifeAndStorage String?
+  order               Int     @default(0)
+
+  // Preliminary Step 5: on-site confirmation that the flow diagram (the
+  // ProcessStep list below) matches what actually happens on the floor.
+  flowConfirmedBy    String?
+  flowConfirmedAt    DateTime?
+  flowConfirmationNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  processSteps ProcessStep[]
+  ingredients  Ingredient[]
+
+  @@index([planId])
+}
+
+// A single ingredient/formulation-component of a product. New in
+// HACCP-Builder (no equivalent in the reference app). Feeds (1) suggested
+// allergen-related hazards at relevant process steps and (2) the
+// per-product allergen declaration inside the allergen-control SOP.
+model Ingredient {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  name                  String
+  percentageOfFormulation String? // free text, e.g. "12.5%"
+  functionalRole        String? // e.g. "preservative", "acidulant", "allergen-containing component"
+  supplierVendorId      String?
+  supplierVendor        Vendor? @relation(fields: [supplierVendorId], references: [id], onDelete: SetNull)
+  countryOfOrigin       String?
+  isAllergen            Boolean @default(false)
+  // Free text, but UI-suggested from the US/CA priority-allergen checklist
+  // (see src/lib/allergenLibrary.ts). Comma-separated if more than one.
+  allergenType String?
+  notes        String?
+  order        Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+  @@index([supplierVendorId])
+}
+
+// A single step in a product's process flow (Preliminary Step 4 — the flow
+// diagram). Hazard analysis and CCP determination hang off each step.
+model ProcessStep {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  order       Int
+  name        String
+  description String?
+
+  hazards Hazard[]
+
+  @@index([productId])
+}
+
+// One identified hazard at a process step (Principle 1: hazard analysis),
+// plus the CCP decision-tree outcome for that hazard (Principle 2) and its
+// preventive-control detail (Principles 3-7).
+model Hazard {
+  id            String      @id @default(cuid())
+  processStepId String
+  processStep   ProcessStep @relation(fields: [processStepId], references: [id], onDelete: Cascade)
+
+  // Allowed values: "BIOLOGICAL" | "CHEMICAL" | "PHYSICAL" | "RADIOLOGICAL"
+  type            String
+  description     String
+  isLikelyToOccur Boolean @default(false)
+  // Allowed values: "LOW" | "MODERATE" | "HIGH" | "SEVERE"
+  severity String @default("MODERATE")
+  // Allowed values: "RARE" | "POSSIBLE" | "LIKELY" | "ALMOST_CERTAIN"
+  likelihood    String  @default("POSSIBLE")
+  justification String?
+
+  requiresPreventiveControl Boolean @default(false)
+
+  // CCP decision-tree answers (Codex four-question tree) and the resulting status
+  ccpQ1DoControlMeasuresExist        Boolean?
+  ccpQ2IsStepSpecificallyToControl   Boolean?
+  ccpQ3CouldContaminationExceedLimit Boolean?
+  ccpQ4WillLaterStepEliminate        Boolean?
+  // Allowed values: "NOT_EVALUATED" | "NOT_A_CCP" | "CCP" | "PRW"
+  // (PRW = a preventive control that isn't a classic CCP)
+  ccpStatus String @default("NOT_EVALUATED")
+
+  // Preventive control details (Principles 3-7)
+  criticalLimit           String?
+  monitoringProcedure     String?
+  monitoringFrequency     String?
+  correctionAction        String?
+  verificationProcedure   String?
+  recordkeepingProcedure  String?
+  responsibleParty        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([processStepId])
+}
+
+// Generated GMP/prerequisite-program and food-safety SOP documents,
+// templated then customized with facility- and product-specific data.
+// Which wizard step a template appears under (GMP vs SOPs) is determined
+// by its `category` in src/lib/sopTemplates.ts, not stored here.
+model Sop {
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  templateKey String
+  title       String
+  content     String // rendered SOP text (markdown)
+  isCustom    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([planId])
+}
+
+// A named member of the recall team, used to auto-populate the Recall Plan
+// document. Distinct from HaccpTeamMember above.
+model RecallContact {
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  role  String
+  name  String
+  phone String?
+  email String?
+  order Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([planId])
+}
+
+// A logged mock recall exercise. Both FDA and CFIA guidance expect these to
+// be performed and evidenced at least annually.
+model MockRecallRecord {
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  performedAt    DateTime
+  performedBy    String?
+  percentTraced  String?
+  resultsSummary String?
+
+  createdAt DateTime @default(now())
+
+  @@index([planId])
+}
+
+// Record of generated export files (for audit trail / re-download).
+model PlanExport {
+  id        String   @id @default(cuid())
+  planId    String
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  format    String   // "docx" | "pdf"
+  createdAt DateTime @default(now())
+
+  @@index([planId])
+}
