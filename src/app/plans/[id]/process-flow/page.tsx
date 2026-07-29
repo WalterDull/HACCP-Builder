@@ -110,13 +110,13 @@ export default function ProcessFlowPage({ params }: { params: { id: string } }) 
 
           <div className="space-y-3">
             {[...active.processSteps].sort((a, b) => a.order - b.order).map((s) => (
-              <div key={s.id} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div key={s.id} className="rounded-lg border border-slate-200 bg-white p-4">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-slate-400">#{s.order}</span>
                   <input
                     defaultValue={s.name}
                     onBlur={(e) => updateStep(s.id, { name: e.target.value })}
-                    className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm font-medium"
+                    className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium"
                   />
                   <button onClick={() => removeStep(s.id)} className="text-xs font-medium text-red-600 hover:underline">
                     Remove
@@ -127,7 +127,7 @@ export default function ProcessFlowPage({ params }: { params: { id: string } }) 
                   onBlur={(e) => updateStep(s.id, { description: e.target.value })}
                   placeholder="Step description"
                   rows={1}
-                  className="mt-2 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                  className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-xs"
                 />
               </div>
             ))}
