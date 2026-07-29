@@ -114,7 +114,7 @@ export default function FacilityProfilePage({ params }: { params: { id: string }
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="block text-sm font-medium text-slate-700">CFIA licence number (if applicable)</label>
             <input
@@ -133,7 +133,7 @@ export default function FacilityProfilePage({ params }: { params: { id: string }
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="block text-sm font-medium text-slate-700">Responsible individual / HACCP team leader</label>
             <input
