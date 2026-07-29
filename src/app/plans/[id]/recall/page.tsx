@@ -112,34 +112,34 @@ export default function RecallPage({ params }: { params: { id: string } }) {
       <p className="text-xs text-slate-500 mb-2">Suggested roles: {SUGGESTED_RECALL_ROLES.join(" · ")}</p>
       <div className="space-y-3">
         {contacts.map((c) => (
-          <div key={c.id} className="rounded-lg border border-slate-200 bg-white p-3">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div key={c.id} className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input
                 defaultValue={c.role}
                 onBlur={(e) => updateContact(c.id, { role: e.target.value })}
                 placeholder="Role"
-                className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
               <input
                 defaultValue={c.name}
                 onBlur={(e) => updateContact(c.id, { name: e.target.value })}
                 placeholder="Name"
-                className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
               <input
                 defaultValue={c.phone ?? ""}
                 onBlur={(e) => updateContact(c.id, { phone: e.target.value })}
                 placeholder="Phone"
-                className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
               <input
                 defaultValue={c.email ?? ""}
                 onBlur={(e) => updateContact(c.id, { email: e.target.value })}
                 placeholder="Email"
-                className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
-            <button onClick={() => removeContact(c.id)} className="mt-2 text-xs font-medium text-red-600 hover:underline">
+            <button onClick={() => removeContact(c.id)} className="mt-3 text-xs font-medium text-red-600 hover:underline">
               Remove
             </button>
           </div>
